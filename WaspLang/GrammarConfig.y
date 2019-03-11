@@ -16,7 +16,7 @@
 #include <algorithm>
 
 #define ENUM_IDENTIFIERS(o) \
-		o(undefine)					/*undefined*/ \
+		o(undefined)				/*undefined*/ \
 		o(function)					/*pointer to a function \
 		o(parameter)				/*parameter to a function*/ \
 		o(variable)					/*local variables*/
@@ -29,7 +29,7 @@ struct identifier
 	id_type type =	id_type::undefined;
 	std::size_t		index = 0;	// function#, parameter# within function, variable#
 	std::string		name;
-}
+};
 
 #define ENUM_EXPRESSIONS(o) \
 		o(nop) o(string) o(number) o(ident)		/*atoms*/ \
@@ -45,7 +45,7 @@ struct identifier
 enum class ex_type { ENUM_EXPRESSIONS(o) };
 #undef o
 
-typedef std::list(struct expression) expr_vec;
+typedef std::list<struct expression> expr_vec;
 struct expression
 {
 	ex_type			type;
