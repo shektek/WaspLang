@@ -67,6 +67,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <None Include="bisq.conj.y" />
     <None Include="GrammarConfig.y" />
   </ItemGroup>
   <ItemGroup>

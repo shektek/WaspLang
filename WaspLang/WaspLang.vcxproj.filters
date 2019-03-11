@@ -16,6 +16,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="GrammarConfig.y" />
+    <None Include="bisq.conj.y" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="conj.c">
