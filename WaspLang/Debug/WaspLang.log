@@ -1,0 +1,14 @@
+﻿Build started 9/03/2019 5:53:55 PM.
+     1>Project "G:\dev\WaspLang\WaspLang\WaspLang.vcxproj" on node 2 (Build target(s)).
+     1>PreBuildEvent:
+         bison GrammarConfig.y -o conj.c
+         :VCEnd
+         'bison' is not recognized as an internal or external command,
+         operable program or batch file.
+     1>C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\V120\Microsoft.CppCommon.targets(122,5): error MSB3073: The command "bison GrammarConfig.y -o conj.c
+C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\V120\Microsoft.CppCommon.targets(122,5): error MSB3073: :VCEnd" exited with code 9009.
+     1>Done Building Project "G:\dev\WaspLang\WaspLang\WaspLang.vcxproj" (Build target(s)) -- FAILED.
+
+Build FAILED.
+
+Time Elapsed 00:00:00.20
