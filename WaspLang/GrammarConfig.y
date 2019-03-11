@@ -59,11 +59,11 @@ struct expression
 	template<typename... T>
 	expression(ex_type t, T&&... args) : type(t), params{std::forward<T>(args)... } { }
 
-	expression()					:	type(ex_type::nop) { }
+	expression()			:	type(ex_type::nop) { }
 	expression(const identifier &i)	:	type(ex_type::ident),	ident(i) { }
-	expression(identifier &&i)		:	type(ex_type::ident),	ident(std::move(i)) { }
-	expression(std::string &&s)		:	type(ex_type::string),	strvalue(std::move(s)) { }
-	expression(long v)				:	type(ex_type::number),	numvalue(v) { }
+	expression(identifier &&i)	:	type(ex_type::ident),	ident(std::move(i)) { }
+	expression(std::string &&s)	:	type(ex_type::string),	strvalue(std::move(s)) { }
+	expression(long v)		:	type(ex_type::number),	numvalue(v) { }
 
 	bool is_pure() const;
 
@@ -150,71 +150,83 @@ struct lexcontext;
 %right '&' "++" "--"
 %left '(' '['
 %type<long>			NUMCONST
-%type<std::string>	IDENTIFIER STRINGCONST
-%type<expression>	expr exprs c_expr1 stmt var_defs var_def1 com_stmt
+%type<std::string>	IDENTIFIER STRINGCONST identifier1
+%type<expression>	expr expr1 exprs exprs1 c_expr1 p_expr1 stmt stmt1 var_defs var_def1 com_stmt
 %%
 
 library:	{ ++ctx; } functions { --ctx; };
-functions:	functions IDENTIFIER { ctx.defun($2); ++ctx; } paramdecls ':' stmt { ctx.add_function(M($2), M($6)); --ctx; }
+functions:	functions identifier1 { ctx.defun($2); ++ctx; } paramdecls colon1 stmt1 { ctx.add_function(M($2), M($6)); --ctx; }
 |			/*empty*/ ;
 paramdecls:	paramdecl 
 |			/*empty*/ ;
-paramdecl:	paramdecl ',' IDENTIFIER	{ ctx.defparam($3); }
-|			IDENTIFIER					{ ctx.defparam($1); };
-stmt:		com_stmt		'}'			{ $$ = M($1); --ctx; }
-|			"if"	'(' exprs ')' stmt	{ $$ = e_cand(M($3), M($5)); }
-|			"while" '(' exprs ')' stmt	{ $$ = e_loop(M($3), M($5)); }
-|			"return" exprs	';'			{ $$ = e_ret(M($2)); }
-|			exprs			';'			{ $$ = M($1); }
-|			';'							{ };
-com_stmt:	'{'							{ $$ = e_comma(); ++ctx; }
-|			com_stmt stmt				{ $$ = M($1); $$.params.push_back(M($2)); };
-var_defs:	"var"			var_def1	{ $$ = e_comma(M($2)); }
-|			var_defs	','	var_def1	{ $$ = M($1); $$.params.push_back(M($3)); };
-var_def1:	IDENTIFIER '=' expr			{ $$ = ctx.def($1) %= M($3); }
-|			IDENTIFIER					{ $$ = ctx.def($1) %= 0l; };
-exprs:		var_defs					{ $$ = M($1); }
-|			expr						{ $$ = M($1); }
-|			expr ','	c_expr1			{ $$ = e_comma(M($1)); $$.params.splice($$.params.end(), M($3.params)); };
-c_expr1:	expr						{ $$ = e_comma(M($1)); }
-|			c_expr1 ',' expr			{ $$ = M($1); $$.params.push_back(M($3)); };
+paramdecl:	paramdecl ',' identifier1	{ ctx.defparam($3); }
+|			IDENTIFIER		{ ctx.defparam($1); };
+identifier1:	error{}	| IDENTIFIER		{ $$ = M($1); };
+colon1:		error{} | ':';
+semicolon1:	error{} | ';';
+cl_brace1:	error{} | '}';
+cl_bracket1:	error{} | ']';
+cl_parens1:	error{} | ')';
+stmt1:		error{} | stmt			{ $$ = M($1); };
+exprs1:		error{} | exprs			{ $$ = M($1); };
+expr1:		error{} | expr			{ $$ = M($1); };
+p_expr1:	error{} | '(' exprs1 cl_parens1	{ $$ = M($2); };
+stmt:			com_stmt	cl_brace1	{ $$ = M($1); --ctx; }
+|			"if"	p_expr1 stmt1		{ $$ = e_cand(M($2), M($3)); }
+|			"while" p_expr1 stmt1		{ $$ = e_loop(M($2), M($3)); }
+|			"return" exprs1	semicolon1	{ $$ = e_ret(M($2)); }
+|			exprs		semicolon1	{ $$ = M($1); }
+|			';'				{ };
+com_stmt:	'{'			{ $$ = e_comma(); ++ctx; }
+|		com_stmt stmt		{ $$ = M($1); $$.params.push_back(M($2)); };
+var_defs:	"var"	var_def1	{ $$ = e_comma(M($2)); }
+|		var_defs ',' var_def1	{ $$ = M($1); $$.params.push_back(M($3)); };
+var_def1:	identifier1 '=' expr1	{ $$ = ctx.def($1) %= M($3); }
+|		identifier1		{ $$ = ctx.def($1) %= 0l; };
+exprs:		var_defs		{ $$ = M($1); }
+|		expr			{ $$ = M($1); }
+|		expr ','	c_expr1	{ $$ = e_comma(M($1)); $$.params.splice($$.params.end(), M($3.params)); };
+c_expr1:	expr1			{ $$ = e_comma(M($1)); }
+|		c_expr1 ',' expr1	{ $$ = M($1); $$.params.push_back(M($3)); };
 expr:		NUMCONST					{ $$ = $1; }
-|			STRINGCONST					{ $$ = M($1); }
-|			IDENTIFIER					{ $$ = ctx.use($1); }
-|			'(' exprs ')'				{ $$ = M($2); }
-|			expr '[' exprs ']'			{ $$ = e_deref(e_add(M($1), M($3))); }
-|			expr '(' ')'				{ $$ = e_fcall(M($1)); }
-|			expr '(' c_expr1 ')'		{ $$ = e_fcall(M($1)); $$.params.splice($$.params.end(), M($3.params)); }
-|			expr '=' expr				{ $$ = M($1) %= M($3); }
-|			expr '+' expr				{ $$ = e_add(M($1), M($3)); }
-|			expr '-' expr	%prec '+'	{ $$ = e_add(M($1), e_neg(M($3))); }
-|			expr "+=" expr				{ if (!$3.is_pure()) { $$ = ctx.temp() %= e_addrof(M($1)); $1 = e_deref($$.params.back()); }
-										  $$ = e_comma(M($$), M($1) %= e_add(C($1), M($3))); }
+|		STRINGCONST					{ $$ = M($1); }
+|		IDENTIFIER					{ $$ = ctx.use($1); }
+|		'(' exprs1 cl_parens1				{ $$ = M($2); }
+|		expr '[' exprs1 cl_bracket1			{ $$ = e_deref(e_add(M($1), M($3))); }
+|		expr '(' ')'					{ $$ = e_fcall(M($1)); }
+|		expr '(' c_expr1 cl_parens1			{ $$ = e_fcall(M($1)); $$.params.splice($$.params.end(), M($3.params)); }
+| expr '=' error {$$=M($1);}  | expr '=' expr			{ $$ = M($1) %= M($3); }
+| expr '+' error {$$=M($1);}  | expr '+' expr			{ $$ = e_add(M($1), M($3)); }
+| expr '-' error {$$=M($1);}  | expr '-' expr	%prec '+'	{ $$ = e_add(M($1), e_neg(M($3))); }
+| expr "+=" error {$$=M($1);} | expr "+=" expr			{ if (!$3.is_pure()) { $$ = ctx.temp() %= e_addrof(M($1)); $1 = e_deref($$.params.back()); }
+									  $$ = e_comma(M($$), M($1) %= e_add(C($1), M($3))); }
 
-|			expr "-=" expr				{ if (!$3.is_pure()) { $$ = ctx.temp() %= e_addrof(M($1)); $1 = e_deref($$.params.back()); }
-										  $$ = e_comma(M($$), M($1) %= e_add(C($1), e_neg(M($3)))); }
+| expr "-=" error {$$=M($1);} | expr "-=" expr			{ if (!$3.is_pure()) { $$ = ctx.temp() %= e_addrof(M($1)); $1 = e_deref($$.params.back()); }
+									$$ = e_comma(M($$), M($1) %= e_add(C($1), e_neg(M($3)))); }
 
-|			"++" expr					{ if (!$2.is_pure()) { $$ = ctx.temp() %= e_addrof(M($2)); $2 = e_deref($$.params.back()); }
-										  $$ = e_comma(M($$), M($2) %= e_add(C($2), 1l)); }
+| "++" error {}		      | "++" expr			{ if (!$2.is_pure()) { $$ = ctx.temp() %= e_addrof(M($2)); $2 = e_deref($$.params.back()); }
+									$$ = e_comma(M($$), M($2) %= e_add(C($2), 1l)); }
 
-|			"--" expr		%prec "++"	{ if (!$2.is_pure()) { $$ = ctx.temp() %= e_addrof(M($2)); $2 = e_deref($$.params.back()); }
-										  $$ = e_comma(M($$), M($2) %= e_add(C($2), -1l)); }
+| "--" error {}		      | "--" expr	%prec "++"	{ if (!$2.is_pure()) { $$ = ctx.temp() %= e_addrof(M($2)); $2 = e_deref($$.params.back()); }
+									$$ = e_comma(M($$), M($2) %= e_add(C($2), -1l)); }
 
-|			expr "++"					{ if (!$1.is_pure()) { $$ = ctx.temp() %= e_addrof(M($1)); $1 = e_deref($$.params.back()); }
-										  auto i = ctx.temp(); $$ = e_comma(M($$), C(i) %= C($1), C($1) %= e_add(C($1), 1l), C(i)); }
+|				expr "++"			{ if (!$1.is_pure()) { $$ = ctx.temp() %= e_addrof(M($1)); $1 = e_deref($$.params.back()); }
+									auto i = ctx.temp(); $$ = e_comma(M($$), C(i) %= C($1), C($1) %= e_add(C($1), 1l), C(i)); }
 
-|			expr "--"		%prec "++"	{ if (!$1.is_pure()) { $$ = ctx.temp() %= e_addrof(M($1)); $1 = e_deref($$.params.back()); }
-										  auto i = ctx.temp(); $$ = e_comma(M($$), C(i) %= C($1), C($1) %= e_add(C($1), -1l), C(i)); }
+|				expr "--"	%prec "++"	{ if (!$1.is_pure()) { $$ = ctx.temp() %= e_addrof(M($1)); $1 = e_deref($$.params.back()); }
+									auto i = ctx.temp(); $$ = e_comma(M($$), C(i) %= C($1), C($1) %= e_add(C($1), -1l), C(i)); }
 
-|			expr '?' expr ':' expr;
-|			expr "||" expr				{ $$ = e_cor(M($1), M($3)); }
-|			expr "&&" expr				{ $$ = e_cand(M($1), M($3)); }
-|			expr "==" expr				{ $$ = e_eq(M($1), M($3)); }
-|			expr "!=" expr	%prec "=="	{ $$ = e_eq(e_eq(M($1), M($3)), 0l); }	/*equality check equals false*/
-|			'&' expr					{ $$ = e_addrof(M($2)); }
-|			'*' expr		%prec '&'	{ $$ = e_deref(M($2)); }
-|			'-' expr		%prec '&'	{ $$ = e_neg(M($2)); }
-|			'!' expr		%prec '&'	{ $$ = e_eq(M($2), 0l); }
+| expr "||" error {$$=M($1);}	| expr "||" expr			{ $$ = e_cor(M($1), M($3)); }
+| expr "&&" error {$$=M($1);}	| expr "&&" expr			{ $$ = e_cand(M($1), M($3)); }
+| expr "==" error {$$=M($1);}	| expr "==" expr			{ $$ = e_eq(M($1), M($3)); }
+| expr "!=" error {$$=M($1);}	| expr "!=" expr	%prec "=="	{ $$ = e_eq(e_eq(M($1), M($3)), 0l); }	/*equality check equals false*/
+| '&' error {}			| '&' expr				{ $$ = e_addrof(M($2)); }
+| '*' error {}			| '*' expr		%prec '&'	{ $$ = e_deref(M($2)); }
+| '-' error {}			| '-' expr		%prec '&'	{ $$ = e_neg(M($2)); }
+| '!' error {}			| '!' expr		%prec '&'	{ $$ = e_eq(M($2), 0l); }
+| expr '?' error {$$=M($1);}	| expr '?' expr ':' expr		{ auto i = ctx.temp();
+										$$ = e_comma(e_cor(e_cand(M($1), e_comma(C(i) %= M($3), 1l)), C(i) %= M($5)), C(i)); }
+
 %%
 
 yy::conj_parser::symbol_type yy::yylex(lexcontext &ctx)
@@ -234,11 +246,11 @@ yy::conj_parser::symbol_type yy::yylex(lexcontext &ctx)
 	"if"			{ return s(conj_parser::make_IF); }
 
 	//identifiers
-	[a-zA-Z_] [a-zA-Z_0-9]*	{ return s(conj_parser::make_IDENTIFIER(std::string(anchor, ctx.cursor)); }
+	[a-zA-Z_] [a-zA-Z_0-9]*	{ return s(conj_parser::make_IDENTIFIER, std::string(anchor, ctx.cursor)); }
 
 	//string and integer literals
-	"\"" [^\"]* "\""	{ return s(conj_parser::make_STRINGCONST(std::string(anchor+1, ctx.cursor-1)); }
-	[0-9]+			{ return s(conj_parser::make_NUMCONST(std::stol(std::string(anchor, ctx.cursor))); }
+	"\"" [^\"]* "\""	{ return s(conj_parser::make_STRINGCONST, std::string(anchor+1, ctx.cursor-1)); }
+	[0-9]+			{ return s(conj_parser::make_NUMCONST, std::stol(std::string(anchor, ctx.cursor))); }
 
 	//whitespace and comments
 	"\000"			{ return s(conj_parser::make_END); }
@@ -256,7 +268,7 @@ yy::conj_parser::symbol_type yy::yylex(lexcontext &ctx)
 	"+="			{ return s(conj_parser::make_PL_EQ); }
 	"-="			{ return s(conj_parser::make_MI_EQ); }
 	//invalid symbols
-	.			{ return s([](auto...s){return conj_parser::symbol_type(s...);}, conj_parser::symbol_type(conj_parser::token_type(ctx.cursor[-1]&0xFF)); }
+	.			{ return s([](auto...s){return conj_parser::symbol_type(s...);}, conj_parser::token_type(ctx.cursor[-1]&0xFF)); }
 %}
 }
 

@@ -1,0 +1,5 @@
+Find c,s:	{ return *s ? (*s==c ? 1 : Find(c,s+1)) : 0; }
+Length s:	{ var result = 0; while(*s++) {++result;} return result; }
+CharNFromEnd s, n:	return s[Length(s)-n];
+
+IstEnd s:	return Find(CharNFromEnd(s, 1), "tT") && Find(CharNFromEnd(s, 2), "sS") && Find(CharNFromEnd(s, 3), "iI");
