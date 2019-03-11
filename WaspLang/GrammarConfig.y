@@ -17,7 +17,7 @@
 
 #define ENUM_IDENTIFIERS(o) \
 		o(undefined)				/*undefined*/ \
-		o(function)					/*pointer to a function \
+		o(function)					/*pointer to a function*/ \
 		o(parameter)				/*parameter to a function*/ \
 		o(variable)					/*local variables*/
 #define o(n) n,
@@ -93,6 +93,8 @@ struct lexcontext;
 {
 	struct lexcontext
 	{
+		const char *cursor;
+		yy::location loc;
 		std::vector<std::map<std::string, identifier> > scopes;
 		std::vector<function> func_list;
 		unsigned tempcounter = 0;
@@ -101,6 +103,7 @@ struct lexcontext;
 			const identifier &define(const std::string &name, identifier &&f)
 			{
 				auto r = scopes.back().emplace(name, std::move(f));
+				if(!r.second) throw yy::conj_parser::syntax_error(loc, "Duplicate definition <"+name+">");
 				return r.first->second;
 			}
 			expression def(const std::string &name)		{ return define(name, identifier{id_type::variable, fun.num_vars++, name}); }
@@ -110,8 +113,12 @@ struct lexcontext;
 			expression use(const std::string &name)
 			{
 				for (auto j = scopes.crbegin(); j != scopes.crend(); ++j)
-					if(auto i = j->find(name); i != j->end())
+				{	
+					auto i = j->find(name);
+					if(i != j->end())
 						return i->second;
+				}
+				throw yy::conj_parser::syntax_error(loc, "Undefined identifier <"+name+">");
 			}
 			void add_function(std::string &&name, expression &&code)
 			{
@@ -123,6 +130,8 @@ struct lexcontext;
 			void operator ++() { scopes.emplace_back(); }	//entering a new scope
 			void operator --() { scopes.pop_back(); }		//exiting scope
 	};
+
+	namespace yy { conj_parser::symbol_type yylex(lexcontext &ctx); }
 
 	#define M(x) std::move(x)
 	#define C(x) expression(x)
@@ -146,7 +155,7 @@ struct lexcontext;
 %%
 
 library:	{ ++ctx; } functions { --ctx; };
-functions:	functions IDENTIFIER { ctx.defun($2); ++ctx; } paramdecls ':' stmt { ctx.add_functions(M($2), M($6)); --ctx; }
+functions:	functions IDENTIFIER { ctx.defun($2); ++ctx; } paramdecls ':' stmt { ctx.add_function(M($2), M($6)); --ctx; }
 |			/*empty*/ ;
 paramdecls:	paramdecl 
 |			/*empty*/ ;
@@ -161,7 +170,7 @@ stmt:		com_stmt		'}'			{ $$ = M($1); --ctx; }
 com_stmt:	'{'							{ $$ = e_comma(); ++ctx; }
 |			com_stmt stmt				{ $$ = M($1); $$.params.push_back(M($2)); };
 var_defs:	"var"			var_def1	{ $$ = e_comma(M($2)); }
-|			var_defs	','	var_def1	{ $$ = M($1); $$.params.push_backs(M($3)); };
+|			var_defs	','	var_def1	{ $$ = M($1); $$.params.push_back(M($3)); };
 var_def1:	IDENTIFIER '=' expr			{ $$ = ctx.def($1) %= M($3); }
 |			IDENTIFIER					{ $$ = ctx.def($1) %= 0l; };
 exprs:		var_defs					{ $$ = M($1); }
@@ -173,7 +182,7 @@ expr:		NUMCONST					{ $$ = $1; }
 |			STRINGCONST					{ $$ = M($1); }
 |			IDENTIFIER					{ $$ = ctx.use($1); }
 |			'(' exprs ')'				{ $$ = M($2); }
-|			expr '[' exprs ']'			{ $$ = e_deref(e_add(M$1), M($3))); }
+|			expr '[' exprs ']'			{ $$ = e_deref(e_add(M($1), M($3))); }
 |			expr '(' ')'				{ $$ = e_fcall(M($1)); }
 |			expr '(' c_expr1 ')'		{ $$ = e_fcall(M($1)); $$.params.splice($$.params.end(), M($3.params)); }
 |			expr '=' expr				{ $$ = M($1) %= M($3); }
@@ -208,6 +217,57 @@ expr:		NUMCONST					{ $$ = $1; }
 |			'!' expr		%prec '&'	{ $$ = e_eq(M($2), 0l); }
 %%
 
+yy::conj_parser::symbol_type yy::yylex(lexcontext &ctx)
+{
+	const char *anchor = ctx.cursor;
+	ctx.loc.step();
+	auto s = [&](auto func, auto&&... params) { ctx.loc.columns(ctx.cursor - anchor); return func(params..., ctx.loc); };
+%{ /*Begin the lexer in here - can use flex but this is for re2c*/
+	re2c:yyfill:enable = 0;
+	re2c:define:YYCTYPE = "char";
+	re2c:define:YYCURSOR = "ctx.cursor";	
+
+	//keywords
+	"return"		{ return s(conj_parser::make_RETURN); }
+	"while"			{ return s(conj_parser::make_WHILE); }
+	"var"			{ return s(conj_parser::make_VAR); }
+	"if"			{ return s(conj_parser::make_IF); }
+
+	//identifiers
+	[a-zA-Z_] [a-zA-Z_0-9]*	{ return s(conj_parser::make_IDENTIFIER(std::string(anchor, ctx.cursor)); }
+
+	//string and integer literals
+	"\"" [^\"]* "\""	{ return s(conj_parser::make_STRINGCONST(std::string(anchor+1, ctx.cursor-1)); }
+	[0-9]+			{ return s(conj_parser::make_NUMCONST(std::stol(std::string(anchor, ctx.cursor))); }
+
+	//whitespace and comments
+	"\000"			{ return s(conj_parser::make_END); }
+	"\r\n" | [\r\n]		{ ctx.loc.lines(); return yylex(ctx); }
+	"//" [^\r\n]*		{ return yylex(ctx); }
+	[\t\v\b\f ]		{ ctx.loc.columns(); return yylex(ctx); }
+
+	//multichar operators
+	"&&"			{ return s(conj_parser::make_AND); }
+	"||"			{ return s(conj_parser::make_OR); }
+	"++"			{ return s(conj_parser::make_PP); }
+	"--"			{ return s(conj_parser::make_MM); }
+	"!="			{ return s(conj_parser::make_NE); }
+	"=="			{ return s(conj_parser::make_EQ); }
+	"+="			{ return s(conj_parser::make_PL_EQ); }
+	"-="			{ return s(conj_parser::make_MI_EQ); }
+	//invalid symbols
+	.			{ return s([](auto...s){return conj_parser::symbol_type(s...);}, conj_parser::symbol_type(conj_parser::token_type(ctx.cursor[-1]&0xFF)); }
+%}
+}
+
+void yy::conj_parser::error(const location_type &l, const std::string &m)
+{
+	std::cerr << (l.begin.filename ? l.begin.filename->c_str() : "(undefined)");
+	std::cerr << ':' << l.begin.line << ':' << l.begin.column << '-' << l.end.column << ": " << m << '\n';
+}
+
+#include <fstream>
+
 //body of the is_pure function for the expression struct above
 //is_pure indicates whether the expression can be duplicated or deleted without changing program behaviour
 bool expression::is_pure() const
@@ -229,4 +289,22 @@ bool expression::is_pure() const
 			default: true;
 		}
 	}
+}
+
+int main(int argc, char **argv)
+{
+	std::string filename = argv[1];
+	std::ifstream f(filename);
+	std::string buffer(std::istreambuf_iterator<char>(f), {});
+
+	lexcontext ctx;
+	ctx.cursor = buffer.c_str();
+	ctx.loc.begin.filename = &filename;
+	ctx.loc.end.filename = &filename;
+
+	yy::conj_parser parser(ctx);
+	parser.parse();
+	std::vector<function> func_list = std::move(ctx.func_list);
+
+	return 0;
 }
