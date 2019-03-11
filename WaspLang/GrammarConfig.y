@@ -185,10 +185,10 @@ expr:		NUMCONST					{ $$ = $1; }
 |			expr "-=" expr				{ if (!$3.is_pure()) { $$ = ctx.temp() %= e_addrof(M($1)); $1 = e_deref($$.params.back()); }
 										  $$ = e_comma(M($$), M($1) %= e_add(C($1), e_neg(M($3)))); }
 
-|			"++" expr					{ if (!$2.is_pure()) { $$ = ctx.temp() %= e_addrof(M($1)); $1 = e_deref($$.params.back()); }
+|			"++" expr					{ if (!$2.is_pure()) { $$ = ctx.temp() %= e_addrof(M($2)); $2 = e_deref($$.params.back()); }
 										  $$ = e_comma(M($$), M($2) %= e_add(C($2), 1l)); }
 
-|			"--" expr		%prec "++"	{ if (!$2.is_pure()) { $$ = ctx.temp() %= e_addrof(M($1)); $1 = e_deref($$.params.back()); }
+|			"--" expr		%prec "++"	{ if (!$2.is_pure()) { $$ = ctx.temp() %= e_addrof(M($2)); $2 = e_deref($$.params.back()); }
 										  $$ = e_comma(M($$), M($2) %= e_add(C($2), -1l)); }
 
 |			expr "++"					{ if (!$1.is_pure()) { $$ = ctx.temp() %= e_addrof(M($1)); $1 = e_deref($$.params.back()); }
